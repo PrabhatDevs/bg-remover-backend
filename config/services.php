@@ -34,5 +34,8 @@ return [
             'channel' => env('SLACK_BOT_USER_DEFAULT_CHANNEL'),
         ],
     ],
+    'replicate' => [
+        'token' => env('REPLICATE_API_TOKEN'),
+    ],
 
 ];

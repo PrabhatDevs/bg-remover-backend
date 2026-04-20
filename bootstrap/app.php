@@ -13,12 +13,25 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        $middleware->statefulApi();
-        $middleware->trustProxies(at: '*'); // ADD THIS LINE
-        // $middleware->validateCsrfTokens(except: [
-        //     'api/v1/register',
-        // ]);
-      
+
+        $middleware->web(append: [
+            \Illuminate\Cookie\Middleware\EncryptCookies::class,
+            \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+        ]);
+
+        $middleware->validateCsrfTokens(except: [
+            'api/*',
+        ]);
+
+        // ✅ KEEP THIS
+        $middleware->alias([
+            'cookie.token' => \App\Http\Middleware\UseCookieToken::class,
+        ]);
+
+        // 🔥 ADD THIS (CRITICAL FIX)
+        $middleware->api(prepend: [
+            \App\Http\Middleware\UseCookieToken::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(function (Request $request, Throwable $e) {

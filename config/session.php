@@ -156,8 +156,8 @@ return [
     |
     */
 
-    // 'domain' => env('SESSION_DOMAIN'),
-    'domain'=> 'unemitting-dalilah-inefficaciously.ngrok-free.dev',
+    'domain' => env('SESSION_DOMAIN'),
+    // 'domain'=> 'unemitting-dalilah-inefficaciously.ngrok-free.dev',
 
     /*
     |--------------------------------------------------------------------------

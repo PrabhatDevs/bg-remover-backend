@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Helpers\AuthHelper;
 use App\Mail\OtpMail;
 use App\Mail\PasswordResetMail;
 use App\Models\Plan;
@@ -11,6 +12,7 @@ use Cache;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Log;
 use Mail;
 use Str;
 
@@ -31,24 +33,20 @@ class AuthController extends Controller
             'plan_type' => 'free',
         ]);
 
-        // COOKIE LOGIC: Logs the user into the session
-        Auth::login($user);
         $email = $request->email;
-        // 1. Generate a 6-digit OTP
+
         $otp = rand(100000, 999999);
-        // 2. Store in Cache for 10 minutes (keyed by email)
         Cache::put('otp_' . $email, $otp, now()->addMinutes(10));
-        // 3. Send the Email
+
         Mail::to($email)->send(new OtpMail($otp));
 
-        // TOKEN LOGIC: For your future Mobile App
+        // 🔐 Create token
         $token = $user->createToken('auth_token')->plainTextToken;
+
         return response()->json([
-            'message' => 'Registration successful! Please check your email for the verification code to unlock full features.',
+            'message' => 'Registration successful!',
             'user' => $user,
-            'access_token' => $token, // Keep for mobile
-            'requires_verification' => true,
-        ], 201);
+        ], 201)->withCookie(AuthHelper::cookie($token));
     }
 
     public function login(Request $request)
@@ -57,177 +55,221 @@ class AuthController extends Controller
             'email' => 'required|string|email',
             'password' => 'required|string',
         ]);
-        if (Auth::attempt($credentials)) {
-            $request->session()->regenerate();
 
-            // TOKEN LOGIC: For your future Mobile App
-            // $token = $user->createToken('auth_token')->plainTextToken;
+        // Attempt to find the user first
+        $user = \App\Models\User::where('email', $credentials['email'])->first();
 
-            return response()->json([
-                'message' => 'Logged in successfully',
-                'user' => Auth::user(),
-                // 'access_token' => $token, // Keep for mobile
-
-            ], 200);
+        // Check if user exists and password is correct
+        if (!$user || !\Hash::check($credentials['password'], $user->password)) {
+            return response()->json(['message' => 'Invalid credentials'], 422);
         }
-        return response()->json(['message' => 'Invalid credentials'], 422);
+
+        // REMOVED: $request->session()->regenerate();
+        // We are no longer using sessions/cookies, so we don't need this.
+
+        // 🔐 Create token
+        $token = $user->createToken('auth_token')->plainTextToken;
+
+        return response()->json([
+            'message' => 'Login successful!',
+            'user' => $user,
+        ], 200)->withCookie(AuthHelper::cookie($token));
     }
 
 
 
     public function logout(Request $request)
     {
-        Auth::guard('web')->logout(); // Clears the cookie
-        $request->user()->currentAccessToken()->delete(); // Clears the token
-        return response()->json(['message' => 'Logged out']);
+
+        Log::info('Logout requested');
+        // 1. Revoke the token in the database
+        // Because your middleware sets the Authorization header, 
+        // $request->user() will correctly return the user and their token.
+        if ($request->user()) {
+            $request->user()->currentAccessToken()->delete();
+        }
+
+        // 2. Clear the HttpOnly cookie
+        // We send a cookie with the same name but expired (-1)
+        $forgetCookie = AuthHelper::forgetCookie(); // Assuming you have this helper method
+
+        return response()->json([
+            'message' => 'Logged out successfully'
+        ], 200)->withCookie($forgetCookie);
     }
     public function verifyOtp(Request $request)
     {
-        // 1. Validate the input
         $request->validate([
             'otp' => 'required|numeric|digits:6',
         ]);
 
         $user = $request->user();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated'
+            ], 401);
+        }
+
         $email = $user->email;
 
-        // 2. Retrieve the OTP from Cache
         $storedOtp = Cache::get('otp_' . $email);
 
-        // 3. Compare and Verify
         if (!$storedOtp || $storedOtp != $request->otp) {
             return response()->json([
                 'success' => false,
-                'message' => 'The code is invalid or has expired. Please request a new one.'
+                'message' => 'The code is invalid or has expired.'
             ], 422);
         }
 
-        // 4. Success: Mark email as verified
-        $user->email_verified_at = Carbon::now();
+        $user->email_verified_at = now();
         $user->save();
 
-        // 5. Clear the Cache so the OTP can't be used again
         Cache::forget('otp_' . $email);
+
+        $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
             'success' => true,
-            'message' => 'Email verified successfully! You can now use all AI Features.',
-            'user' => $user // Send updated user to refresh React state
-        ], 200);
+            'message' => 'Email verified successfully!',
+            'user' => $user
+        ])->withCookie(
+                AuthHelper::cookie($token)
+            );
     }
     public function resendOtp(Request $request)
     {
-        $user = Auth::user();
+        $user = $request->user(); // Authenticated via your Hybrid Cookie Middleware
+
+        if (!$user) {
+            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
+        }
+
+        if ($user->email_verified_at) {
+            return response()->json(['success' => false, 'message' => 'Email already verified'], 400);
+        }
+
         $email = $user->email;
+        $cooldownKey = 'otp_cooldown_' . $email;
 
-        // 1. Generate a new 6-digit OTP
+        if (Cache::has($cooldownKey)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Please wait a moment before requesting another code.'
+            ], 429);
+        }
+
         $otp = rand(100000, 999999);
-
-        // 2. Store in Cache for 10 minutes (keyed by email)
         Cache::put('otp_' . $email, $otp, now()->addMinutes(10));
+        Cache::put($cooldownKey, true, now()->addSeconds(60));
 
-        // 3. Send the Email
-        Mail::to($email)->send(new OtpMail($otp));
+        // Mail::to($email)->send(new OtpMail($otp));
 
         return response()->json([
             'success' => true,
             'message' => 'A new verification code has been sent to your email.'
-        ], 200);
+        ]);
     }
     public function forgotPassword(Request $request)
     {
         $request->validate(['email' => 'required|email']);
+        $email = $request->email;
+        $cooldownKey = 'password_otp_cooldown_' . $email;
 
-        // Check if we already sent an OTP recently to prevent spam
-        if (Cache::has('password_otp_' . $request->email)) {
+        // Check 60-second cooldown instead of the 15-minute OTP existence
+        if (Cache::has($cooldownKey)) {
             return response()->json([
-                'message' => 'A code was already sent. Please wait before requesting another.'
+                'message' => 'Please wait before requesting another code.'
             ], 429);
         }
 
-        $user = User::where('email', $request->email)->first();
+        $user = User::where('email', $email)->first();
 
-        // Security: Masking the user existence
-        if (!$user) {
-            return response()->json(['message' => 'If that email is registered, you will receive an OTP shortly.'], 200);
+        if ($user) {
+            $otp = rand(100000, 999999);
+            // Store OTP for 15 mins
+            Cache::put('password_otp_' . $email, $otp, now()->addMinutes(15));
+            // Set 60s cooldown
+            Cache::put($cooldownKey, true, now()->addSeconds(60));
+            // Store timestamp for the "resend" countdown timer in React
+            Cache::put('last_sent_otp_' . $email, now(), now()->addMinutes(2));
+
+            Mail::to($user->email)->send(new PasswordResetMail($otp));
         }
 
-        $otp = rand(100000, 999999);
-        Cache::put('password_otp_' . $user->email, $otp, now()->addMinutes(15));
-
-        Mail::to($user->email)->send(new PasswordResetMail($otp));
-
-        return response()->json(['message' => 'If that email is registered, you will receive an OTP shortly.'], 200);
+        // Always 200 to mask user existence
+        return response()->json([
+            'message' => 'If that email is registered, you will receive an OTP shortly.'
+        ], 200);
     }
     public function resetPassword(Request $request)
     {
         $request->validate([
             'email' => 'required|email',
             'otp' => 'required|numeric',
-            'password' => 'required|string|min:8', // Needs password_confirmation in request
+            'password' => 'required|string|min:8|confirmed', // 'confirmed' looks for password_confirmation
         ]);
 
-        // Retrieve from cache using the email key
         $storedOtp = Cache::get('password_otp_' . $request->email);
 
-        // Verify OTP
         if (!$storedOtp || $storedOtp != $request->otp) {
             return response()->json(['message' => 'Invalid or expired OTP code.'], 422);
         }
 
-        // Update User
         $user = User::where('email', $request->email)->first();
+
+        if (!$user) {
+            return response()->json(['message' => 'User not found.'], 404);
+        }
+
         $user->password = Hash::make($request->password);
         $user->save();
-        // Clear Cache
+
+        // Cleanup: Clear OTP, cooldown, and timestamp
         Cache::forget('password_otp_' . $request->email);
+        Cache::forget('password_otp_cooldown_' . $request->email);
+        Cache::forget('last_sent_otp_' . $request->email);
 
         return response()->json(['message' => 'Password reset successfully. You can now login.']);
     }
-
     public function resendForgotPasswordOtp(Request $request)
     {
         $request->validate(['email' => 'required|email']);
+        $email = $request->email;
 
-        // 1. Check if the OTP even exists (15 min window)
-        $otp = Cache::get('password_otp_' . $request->email);
+        $cooldownKey = 'password_otp_cooldown_' . $email;
 
-        if (!$otp) {
-            // If the OTP expired from cache, they need a brand new one
-            return $this->forgotPassword($request);
+        // ⏱ Check cooldown (60s)
+        if (Cache::has($cooldownKey)) {
+            return response()->json([
+                'message' => 'Please wait before requesting another code.'
+            ], 429);
         }
 
-        // 2. Dynamic Cooldown Logic
-        $lastSent = Cache::get('last_sent_otp_' . $request->email);
-
-        if ($lastSent) {
-            $secondsSinceLastSent = now()->diffInSeconds($lastSent);
-            $cooldown = 60; // Your limit
-
-            if ($secondsSinceLastSent < $cooldown) {
-                $secondsLeft = $cooldown - $secondsSinceLastSent;
-
-                return response()->json([
-                    'message' => "Please wait {$secondsLeft} seconds before requesting another code.",
-                    'seconds_left' => $secondsLeft // Sending as a variable for React to use
-                ], 429);
-            }
-        }
-
-        // 3. Resend Logic
-        $user = User::where('email', $request->email)->first();
+        $user = User::where('email', $email)->first();
 
         if ($user) {
-            Mail::to($user->email)->send(new PasswordResetMail($otp));
+            // 🔥 Generate NEW OTP (not reuse old)
+            $otp = rand(100000, 999999);
 
-            // Update the "last_sent" timestamp to NOW
-            Cache::put('last_sent_otp_' . $request->email, now(), now()->addMinutes(2));
+            // ⏳ Store OTP (15 mins)
+            Cache::put('password_otp_' . $email, $otp, now()->addMinutes(15));
+
+            // ⏱ Set cooldown
+            Cache::put($cooldownKey, true, now()->addSeconds(60));
+
+            // ⏳ Track last sent time (for frontend timer)
+            Cache::put('last_sent_otp_' . $email, now(), now()->addMinutes(2));
+
+            // 📧 Send mail
+            Mail::to($user->email)->send(new PasswordResetMail($otp));
         }
 
+        // 🔒 Always same response (security)
         return response()->json([
-            'message' => 'OTP has been resent to your email.',
-            'seconds_left' => 60 // Reset the frontend timer
-        ]);
+            'message' => 'If that email is registered, you will receive an OTP shortly.'
+        ], 200);
     }
 
     public function getPlans()

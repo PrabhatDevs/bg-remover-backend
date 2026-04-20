@@ -15,13 +15,14 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['api/*'],
 
     'allowed_methods' => ['*'],
 
     'allowed_origins' => [
         'http://localhost:5173',
-        'https://unemitting-dalilah-inefficaciously.ngrok-free.dev'
+        'https://unemitting-dalilah-inefficaciously.ngrok-free.dev',
+        'https://bgremoverfrontend.netlify.app'
     ],
     'allowed_origins_patterns' => [],
 
