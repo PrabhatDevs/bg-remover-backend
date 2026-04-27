@@ -14,23 +14,33 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
 
-        $middleware->web(append: [
-            \Illuminate\Cookie\Middleware\EncryptCookies::class,
-            \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
-        ]);
-
+        // ❌ REMOVE — only needed for cookie/session based auth
+        // $middleware->web(append: [
+        //     \Illuminate\Cookie\Middleware\EncryptCookies::class,
+        //     \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+        // ]);
+    
+        // ❌ REMOVE — CSRF not needed for API + Bearer token
         $middleware->validateCsrfTokens(except: [
             'api/*',
         ]);
 
-        // ✅ KEEP THIS
+        // ❌ REMOVE — your custom cookie middleware (not needed anymore)
         $middleware->alias([
-            'cookie.token' => \App\Http\Middleware\UseCookieToken::class,
+            // 'cookie.token' => \App\Http\Middleware\UseCookieToken::class,
+            'optional.auth' => \App\Http\Middleware\OptionalAuth::class,
+            'verify.client' => \App\Http\Middleware\VerifyClient::class,
         ]);
 
-        // 🔥 ADD THIS (CRITICAL FIX)
+        // ❌ REMOVE — no need to inject cookie → bearer anymore
+        // $middleware->api(prepend: [
+        //     \Illuminate\Http\Middleware\HandleCors::class,
+        //     \App\Http\Middleware\UseCookieToken::class,
+        // ]);
+    
+        // ✅ OPTIONAL (keep if you want explicit CORS handling)
         $middleware->api(prepend: [
-            \App\Http\Middleware\UseCookieToken::class,
+            \Illuminate\Http\Middleware\HandleCors::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

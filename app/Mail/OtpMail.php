@@ -27,7 +27,7 @@ class OtpMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Your Verification Code - ToolsByPrabhat',
+            subject: 'Your Verification Code - PixoCut',
         );
     }
 
@@ -37,7 +37,7 @@ class OtpMail extends Mailable
     public function content(): Content
     {
         return new Content(
-            view: 'emails.otp',
+            view: 'emails.account-confirm',
         );
     }
 

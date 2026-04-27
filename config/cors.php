@@ -22,7 +22,8 @@ return [
     'allowed_origins' => [
         'http://localhost:5173',
         'https://unemitting-dalilah-inefficaciously.ngrok-free.dev',
-        'https://bgremoverfrontend.netlify.app'
+        'https://bgremoverfrontend.netlify.app',
+        'http://localhost:5500'
     ],
     'allowed_origins_patterns' => [],
 
@@ -32,6 +33,6 @@ return [
 
     'max_age' => 0,
 
-    'supports_credentials' => true,
+    'supports_credentials' => false,
 
 ];

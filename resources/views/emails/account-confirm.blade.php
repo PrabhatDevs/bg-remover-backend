@@ -192,13 +192,13 @@
         <table class="container" role="presentation">
             <tr>
                 <td class="content">
-                    <span class="brand">Toolsbyprabhat</span>
+                    <span class="brand">PixoCut</span><img src="{{ asset('images/favicon.ico') }}" width="60" alt="PixoCut">
                     <h1 class="heading">Confirm Identity</h1>
                     <p class="text">To keep your account secure, please enter the verification code provided below. It
                         will remain active for 10 minutes.</p>
 
                     <div class="otp-box">
-                        <div class="otp-code">920 481</div>
+                        <div class="otp-code"> {{ $otp }}</div>
                     </div>
 
                     <p class="text" style="font-size: 13px; margin-bottom: 0;">

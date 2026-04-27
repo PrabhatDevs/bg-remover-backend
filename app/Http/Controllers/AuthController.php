@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Helpers\AuthHelper;
+use App\Helpers\CheckDisposableEmail;
 use App\Mail\OtpMail;
 use App\Mail\PasswordResetMail;
 use App\Models\Plan;
@@ -12,6 +13,7 @@ use Cache;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Http;
 use Log;
 use Mail;
 use Str;
@@ -26,6 +28,17 @@ class AuthController extends Controller
             'password' => 'required|string|min:8',
         ]);
 
+        $domain = substr(strrchr($request->email, "@"), 1);
+        if (!checkdnsrr($domain, "MX")) {
+            return response()->json([
+                'message' => 'Invalid email domain'
+            ], 422);
+        }
+        if (CheckDisposableEmail::isFakeEmail($request->email)) {
+            return response()->json([
+                'message' => 'Temporary email addresses are not allowed'
+            ], 422);
+        }
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
@@ -33,7 +46,7 @@ class AuthController extends Controller
             'plan_type' => 'free',
         ]);
 
-        $email = $request->email;
+        $email = $user->email;
 
         $otp = rand(100000, 999999);
         Cache::put('otp_' . $email, $otp, now()->addMinutes(10));
@@ -41,61 +54,85 @@ class AuthController extends Controller
         Mail::to($email)->send(new OtpMail($otp));
 
         // 🔐 Create token
-        $token = $user->createToken('auth_token')->plainTextToken;
+        $token = $user->createToken(
+            'auth_token',
+            [],
+            now()->addHours(6) // ⏱ expires in 6 hours
+        )->plainTextToken;
 
         return response()->json([
             'message' => 'Registration successful!',
             'user' => $user,
-        ], 201)->withCookie(AuthHelper::cookie($token));
+            'access_token' => $token,
+            'token_type' => 'Bearer',
+        ], 201);
     }
 
     public function login(Request $request)
     {
         $credentials = $request->validate([
-            'email' => 'required|string|email',
-            'password' => 'required|string',
+            'email' => 'required|email',
+            'password' => 'required',
         ]);
 
-        // Attempt to find the user first
-        $user = \App\Models\User::where('email', $credentials['email'])->first();
+        $user = User::where('email', $credentials['email'])->first();
 
-        // Check if user exists and password is correct
         if (!$user || !\Hash::check($credentials['password'], $user->password)) {
             return response()->json(['message' => 'Invalid credentials'], 422);
         }
 
-        // REMOVED: $request->session()->regenerate();
-        // We are no longer using sessions/cookies, so we don't need this.
-
         // 🔐 Create token
-        $token = $user->createToken('auth_token')->plainTextToken;
+        $token = $user->createToken(
+            'auth_token',
+            [],
+            now()->addHours(6) // ⏱ expires in 6 hours
+        )->plainTextToken;
 
         return response()->json([
-            'message' => 'Login successful!',
             'user' => $user,
-        ], 200)->withCookie(AuthHelper::cookie($token));
+            'access_token' => $token,
+            'token_type' => 'Bearer',
+        ]);
     }
 
 
 
     public function logout(Request $request)
     {
-
-        Log::info('Logout requested');
-        // 1. Revoke the token in the database
-        // Because your middleware sets the Authorization header, 
-        // $request->user() will correctly return the user and their token.
         if ($request->user()) {
             $request->user()->currentAccessToken()->delete();
         }
 
-        // 2. Clear the HttpOnly cookie
-        // We send a cookie with the same name but expired (-1)
-        $forgetCookie = AuthHelper::forgetCookie(); // Assuming you have this helper method
-
         return response()->json([
             'message' => 'Logged out successfully'
-        ], 200)->withCookie($forgetCookie);
+        ]);
+    }
+    public function resendOtp(Request $request)
+    {
+        $user = $request->user();
+
+        if (!$user) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Unauthenticated'
+            ], 401);
+        }
+
+        $email = $user->email;
+
+        // 🔥 Generate NEW OTP (not reuse old)
+        $otp = rand(100000, 999999);
+
+        // ⏳ Store OTP (10 mins)
+        Cache::put('otp_' . $email, $otp, now()->addMinutes(10));
+
+        // 📧 Send mail
+        Mail::to($user->email)->send(new OtpMail($otp));
+
+        return response()->json([
+            'success' => true,
+            'message' => 'A new OTP has been sent to your email.'
+        ], 200);
     }
     public function verifyOtp(Request $request)
     {
@@ -123,53 +160,26 @@ class AuthController extends Controller
             ], 422);
         }
 
+        // ✅ mark verified
         $user->email_verified_at = now();
         $user->save();
 
+        // ✅ clear OTP
         Cache::forget('otp_' . $email);
 
+        // 🔐 OPTIONAL: revoke old tokens (good practice)
+        $user->tokens()->delete();
+
+        // 🔐 create fresh token
         $token = $user->createToken('auth_token')->plainTextToken;
 
         return response()->json([
             'success' => true,
             'message' => 'Email verified successfully!',
-            'user' => $user
-        ])->withCookie(
-                AuthHelper::cookie($token)
-            );
-    }
-    public function resendOtp(Request $request)
-    {
-        $user = $request->user(); // Authenticated via your Hybrid Cookie Middleware
-
-        if (!$user) {
-            return response()->json(['success' => false, 'message' => 'Unauthenticated'], 401);
-        }
-
-        if ($user->email_verified_at) {
-            return response()->json(['success' => false, 'message' => 'Email already verified'], 400);
-        }
-
-        $email = $user->email;
-        $cooldownKey = 'otp_cooldown_' . $email;
-
-        if (Cache::has($cooldownKey)) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Please wait a moment before requesting another code.'
-            ], 429);
-        }
-
-        $otp = rand(100000, 999999);
-        Cache::put('otp_' . $email, $otp, now()->addMinutes(10));
-        Cache::put($cooldownKey, true, now()->addSeconds(60));
-
-        // Mail::to($email)->send(new OtpMail($otp));
-
-        return response()->json([
-            'success' => true,
-            'message' => 'A new verification code has been sent to your email.'
-        ]);
+            'user' => $user,
+            'access_token' => $token,
+            'token_type' => 'Bearer',
+        ], 200);
     }
     public function forgotPassword(Request $request)
     {
@@ -281,5 +291,46 @@ class AuthController extends Controller
         ], 200);
     }
 
+    public function googleLogin(Request $request)
+    {
+        $token = $request->token;
 
+        $response = Http::get('https://oauth2.googleapis.com/tokeninfo', [
+            'id_token' => $token
+        ]);
+
+        if ($response->failed()) {
+            return response()->json(['error' => 'Invalid token'], 401);
+        }
+
+        $googleUser = $response->json();
+
+        if (
+            !isset($googleUser['email']) ||
+            !$googleUser['email_verified']
+        ) {
+            return response()->json(['error' => 'Email not verified'], 401);
+        }
+
+        if ($googleUser['aud'] !== env('GOOGLE_CLIENT_ID')) {
+            return response()->json(['error' => 'Invalid client'], 401);
+        }
+
+        $user = User::where('email', $googleUser['email'])->first();
+
+        if (!$user) {
+            $user = User::create([
+                'name' => $googleUser['name'] ?? 'User',
+                'email' => $googleUser['email'],
+                'password' => bcrypt(str()->random(16)),
+                'provider' => 'google'
+            ]);
+        }
+
+        $token = $user->createToken('auth_token')->plainTextToken;
+
+        return response()->json([
+            'user' => $user
+        ])->withCookie(AuthHelper::cookie($token));
+    }
 }

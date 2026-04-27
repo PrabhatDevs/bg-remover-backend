@@ -1,30 +1,20 @@
 <?php
 namespace App\Helpers;
 
+use Symfony\Component\HttpFoundation\Cookie;
+
 class AuthHelper
 {
     public static function cookie($token)
     {
-        // return cookie(
-        //     'access_token',
-        //     $token,
-        //     60 * 24 * 7,
-        //     '/',
-        //     null,   // 🔥 IMPORTANT for ngrok
-        //     true,   // Secure
-        //     true,   // HttpOnly
-        //     false,
-        //     'None'  // 🔥 REQUIRED for cross-site
-        // );
-
         return cookie(
             'access_token',
             $token,
             60 * 24 * 7,
             '/',
-            'unemitting-dalilah-inefficaciously.ngrok-free.dev', // ✅ EXACT
-            true,
-            true,
+            'unemitting-dalilah-inefficaciously.ngrok-free.dev',
+            true,   // Secure
+            true,   // HttpOnly
             false,
             'None'
         );

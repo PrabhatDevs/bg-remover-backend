@@ -10,11 +10,14 @@ class UseCookieToken
     public function handle(Request $request, Closure $next)
     {
         $token = $request->cookie('access_token');
-
+        Log::info('Cookie token:', [$request->cookie('access_token')]);
         if ($token && !$request->bearerToken()) {
-            Log::info('Found access_token cookie, setting Authorization header');
             $request->headers->set('Authorization', 'Bearer ' . $token);
         }
+
+        // 🔥 Log AFTER setting
+        Log::info('Bearer AFTER:', [$request->bearerToken()]);
+        Log::info('Auth header:', [$request->header('Authorization')]);
 
         return $next($request);
     }

@@ -151,13 +151,14 @@
         <table class="container" role="presentation">
             <tr>
                 <td class="content">
-                    <span class="brand">Toolsbyprabhat</span>
+                    <span class="brand">PixoCut</span>
+                    <img src="{{ asset('images/favicon.ico') }}" width="60" alt="PixoCut">
                     <h1 class="heading">Reset Password</h1>
                     <p class="text">We received a request to reset your password. Use the verification code below to
                         proceed with the reset process. This code is valid for 10 minutes.</p>
 
                     <div class="otp-box">
-                        <div class="otp-code">582 904</div>
+                        <div class="otp-code">{{ $otp }}</div>
                     </div>
 
                     <p class="text" style="font-size: 13px; margin-bottom: 0;">

@@ -23,14 +23,33 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        RateLimiter::for('remove-bg', function (Request $request) {
-            // 1. If the user is logged in, give them UNLIMITED access
-            if ($request->user()) {
-                return Limit::none();
-            }
 
-            // 2. If it's a guest, restrict them to 3 requests per minute (1 every 20s)
+        // 🔐 Auth (login/register)
+        RateLimiter::for('auth', function ($request) {
+            return Limit::perMinute(5)->by($request->ip());
+        });
+
+        // 📤 Upload (VERY IMPORTANT)
+        RateLimiter::for('remove-bg', function ($request) {
+            if ($request->user()) {
+                return Limit::perMinute(20)->by($request->user()->id);
+            }
             return Limit::perMinute(3)->by($request->ip());
+        });
+
+        // 🔁 Polling (status check)
+        RateLimiter::for('polling', function ($request) {
+            return Limit::perMinute(30)->by($request->ip());
+        });
+
+        // 📥 Download
+        RateLimiter::for('download', function ($request) {
+            return Limit::perMinute(10)->by($request->ip());
+        });
+
+        // 🔄 OTP resend
+        RateLimiter::for('otp', function ($request) {
+            return Limit::perMinute(2)->by($request->ip());
         });
     }
 }

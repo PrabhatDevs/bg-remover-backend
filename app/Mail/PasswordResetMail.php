@@ -28,7 +28,7 @@ class PasswordResetMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: 'Password Reset Mail',
+            subject: 'Reset Password Request - PixoCut',
         );
     }
 
@@ -38,7 +38,7 @@ class PasswordResetMail extends Mailable
     public function content(): Content
     {
         return new Content(
-            view: 'emails.forgot-password',
+            view: 'emails.password-reset',
             with: [
                 'otp' => $this->otp
             ]

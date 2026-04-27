@@ -160,16 +160,20 @@
                 <td class="content">
                     <span class="brand">Toolsbyprabhat</span>
                     <h1 class="heading">Welcome Aboard!</h1>
-                    <p class="text">We're thrilled to have you here. You're now ready to transform your images with our high-precision <strong>Background Remover</strong> tool.</p>
+                    <p class="text">We're thrilled to have you here. You're now ready to transform your images with our
+                        high-precision <strong>Background Remover</strong> tool.</p>
 
                     <div class="feature-box">
                         <span class="mono-text">100% FREE • NO SUBSCRIPTIONS</span>
-                        <p class="text" style="margin-bottom: 20px; font-size: 14px; color: #1e3a8a;">Get professional, high-resolution results at zero cost. No hidden fees, no limits—just pure utility.</p>
-                        <a href="#" class="cta-button">Remove Background Now</a>
+                        <p class="text" style="margin-bottom: 20px; font-size: 14px; color: #1e3a8a;">Get professional,
+                            high-resolution results at zero cost. No hidden fees, no limits—just pure utility.</p>
+                        <a href="https://pixocut.toolsbyprabhat.com" class="cta-button">Remove Background Now</a>
                     </div>
 
                     <p class="text" style="font-size: 13px; margin-bottom: 0;">
-                        Enjoy using our tools? Feel free to share <a href="#" style="color: #2563eb; text-decoration: none; font-weight: 600;">Toolsbyprabhat</a> with your friends and colleagues!
+                        Enjoy using our tools? Feel free to share <a href="#"
+                            style="color: #2563eb; text-decoration: none; font-weight: 600;">Toolsbyprabhat</a> with
+                        your friends and colleagues!
                     </p>
                 </td>
             </tr>

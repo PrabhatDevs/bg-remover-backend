@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\RemoveBackgroundJob;
 use App\Models\DownloadCount;
 use App\Models\ProcessedImages;
 use Http;
@@ -14,92 +15,50 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class RemoveBgController extends Controller
 {
+
     public function removeBackground(Request $request)
     {
         $request->validate([
-            'image' => 'required|image|max:10240',
+            'image' => 'required|file|image|max:10240',
         ]);
 
-        // 1. Upload Original to R2
-        // Changed disk to 'r2' to keep it consistent
-        $path = $request->file('image')->store('originals', 'r2');
-        $originalUrl = Storage::disk('r2')->url($path);
+        // ❌ Block if multiple files sent using images[]
+        if ($request->hasFile('images')) {
+            return response()->json([
+                'message' => 'Only one image allowed. Please upload a single file.'
+            ], 422);
+        }
 
-        // 2. Create DB record for BOTH Users and Guests
-        // This ensures we always have a record to update later
+        // ❌ Extra safety: if image is array (rare but possible)
+        if (is_array($request->file('image'))) {
+            return response()->json([
+                'message' => 'Multiple files detected. Only one image allowed.'
+            ], 422);
+        }
+
+        if (!$request->hasFile('image')) {
+            return response()->json([
+                'message' => 'No image uploaded'
+            ], 400);
+        }
+        $file = $request->file('image');
+        $path = $file->store('originals', 'r2');
+        $originalUrl = Storage::disk('r2')->url($path);
         $user = $request->user();
         $dbRecord = ProcessedImages::create([
             'user_id' => $user ? $user->id : null,
             'ip_address' => $request->ip(),
             'original_url' => $originalUrl,
-            'status' => 'pending',
-            'result_url' => '', // Place-holder since it's NOT NULL in DB
+            'status' => 'processing',
+            'result_url' => '',
         ]);
 
-        // 3. Call Replicate
-        $response = Http::withToken(config('services.replicate.token'))
-            ->withHeaders(['Prefer' => 'wait'])
-            ->post('https://api.replicate.com/v1/predictions', [
-                'version' => 'a029dff38972b5fda4ec5d75d7d1cd25aeff621d2cf4946a41055d7db66b80bc',
-                'input' => [
-                    'image' => $originalUrl,
-                    'format' => 'png',
-                    'reverse' => false,
-                    'threshold' => 0,
-                    'background_type' => 'rgba'
-                ],
-            ]);
-
-        if ($response->failed()) {
-            $dbRecord->update(['status' => 'failed']);
-            return response()->json([
-                'message' => 'AI Service Error',
-                'error' => $response->json(),
-            ], 500);
-        }
-
-        $prediction = $response->json();
-        $processedUrl = $prediction['output'] ?? null;
-
-        // 4. Polling Fallback (Fixed config path here)
-        if (!$processedUrl && $prediction['status'] !== 'succeeded') {
-            for ($i = 0; $i < 10; $i++) {
-                sleep(2);
-                $check = Http::withToken(config('services.replicate.token'))
-                    ->get("https://api.replicate.com/v1/predictions/{$prediction['id']}");
-
-                if ($check->json('status') === 'succeeded') {
-                    $processedUrl = $check->json('output');
-                    break;
-                }
-                if ($check->json('status') === 'failed')
-                    break;
-            }
-        }
-
-        if (!$processedUrl) {
-            $dbRecord->update(['status' => 'failed']);
-            return response()->json(['message' => 'Processing timeout'], 504);
-        }
-
-        // 5. Save Processed Result to R2
-        $imageContent = file_get_contents($processedUrl);
-        $processedFileName = 'processed/' . Str::random(40) . '.png';
-        Storage::disk('r2')->put($processedFileName, $imageContent);
-        $finalResultUrl = Storage::disk('r2')->url($processedFileName);
-
-        // 6. Final DB Update (Now handles the NOT NULL result_url)
-        $dbRecord->update([
-            'result_url' => $finalResultUrl,
-            'status' => 'completed',
-        ]);
-
+        RemoveBackgroundJob::dispatch($dbRecord->id, $originalUrl);
 
         return response()->json([
-            'message' => 'Background removed successfully!',
-            'original_image_url' => $originalUrl,
-            'processed_image_url' => $finalResultUrl,
-        ], 200);
+            'job_id' => $dbRecord->id,
+            'status' => 'processing'
+        ], 202);
     }
     public function downloadImage($filename)
     {
@@ -147,4 +106,22 @@ class RemoveBgController extends Controller
             'images' => $images,
         ], 200);
     }
+
+    public function checkStatus($jobId)
+    {
+        $record = ProcessedImages::find($jobId);
+
+        if (!$record) {
+            return response()->json(['message' => 'Job not found'], 404);
+        }
+
+        return response()->json([
+            'job_id' => $record->id,
+            'status' => $record->status,
+            // 'status' => 'completed',
+            'result_url' => $record->result_url,
+            'original_url' => $record->original_url,
+        ], 200);
+    }
+
 }
