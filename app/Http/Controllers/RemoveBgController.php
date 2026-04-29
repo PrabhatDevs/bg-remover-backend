@@ -18,43 +18,61 @@ class RemoveBgController extends Controller
 
     public function removeBackground(Request $request)
     {
+      
+
         $request->validate([
             'image' => 'required|file|image|max:10240',
         ]);
 
-        // ❌ Block if multiple files sent using images[]
+       
+
         if ($request->hasFile('images')) {
+           
             return response()->json([
-                'message' => 'Only one image allowed. Please upload a single file.'
+                'message' => 'Only one image allowed.'
             ], 422);
         }
 
-        // ❌ Extra safety: if image is array (rare but possible)
         if (is_array($request->file('image'))) {
+          
             return response()->json([
-                'message' => 'Multiple files detected. Only one image allowed.'
+                'message' => 'Multiple files detected.'
             ], 422);
         }
 
         if (!$request->hasFile('image')) {
+           
             return response()->json([
                 'message' => 'No image uploaded'
             ], 400);
         }
+
+     
+
         $file = $request->file('image');
         $path = $file->store('originals', 'r2');
+
+       
+
         $originalUrl = Storage::disk('r2')->url($path);
+
+      
+
         $user = $request->user();
+
         $dbRecord = ProcessedImages::create([
             'user_id' => $user ? $user->id : null,
             'ip_address' => $request->ip(),
             'original_url' => $originalUrl,
-            'status' => 'processing',
+            'status' => 'queued',
             'result_url' => '',
         ]);
 
+       
+
         RemoveBackgroundJob::dispatch($dbRecord->id, $originalUrl);
 
+      
         return response()->json([
             'job_id' => $dbRecord->id,
             'status' => 'processing'
@@ -109,16 +127,19 @@ class RemoveBgController extends Controller
 
     public function checkStatus($jobId)
     {
+       
+
         $record = ProcessedImages::find($jobId);
 
         if (!$record) {
-            return response()->json(['message' => 'Job not found'], 404);
+            return response()->json([
+                'message' => 'Job not found'
+            ], 404);
         }
 
         return response()->json([
             'job_id' => $record->id,
             'status' => $record->status,
-            // 'status' => 'completed',
             'result_url' => $record->result_url,
             'original_url' => $record->original_url,
         ], 200);

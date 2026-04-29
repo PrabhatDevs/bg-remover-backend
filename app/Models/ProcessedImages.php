@@ -12,5 +12,6 @@ class ProcessedImages extends Model
         'original_url',
         'result_url',
         'status',
+        'prediction_id',
     ];
 }
